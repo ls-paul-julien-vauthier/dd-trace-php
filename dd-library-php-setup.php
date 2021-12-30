@@ -1,5 +1,7 @@
 <?php
 
+// Tests for the installer are in 'dockerfiles/verify_packages/installer'
+
 const INI_CONF = 'Scan this dir for additional .ini files';
 const EXTENSION_DIR = 'extension_dir';
 const THREAD_SAFETY = 'Thread Safety';
@@ -10,10 +12,11 @@ const IS_DEBUG = 'Debug Build';
 const OPT_HELP = 'help';
 const OPT_INSTALL_DIR = 'install-dir';
 const OPT_PHP_BIN = 'php-bin';
-const OPT_TRACER_FILE = 'tracer-file';
-const OPT_TRACER_URL = 'tracer-url';
-const OPT_TRACER_VERSION = 'tracer-version';
+const OPT_FILE = 'file';
+const OPT_URL = 'url';
+const OPT_VERSION = 'version';
 const OPT_UNINSTALL = 'uninstall';
+const OPT_ENABLE_PROFILING = 'enable-profiling';
 
 function main()
 {
@@ -29,33 +32,35 @@ function main()
     }
 }
 
-function print_help_and_exit()
+function print_help()
 {
     echo <<<EOD
 
 Usage:
     Interactive
-        php get-dd-trace.php --tracer-version x.y.z ...
+        php get-dd-trace.php --version x.y.z ...
     Non-Interactive
-        php get-dd-trace.php --tracer-version x.y.z --php-bin php ...
-        php get-dd-trace.php --tracer-version x.y.z --php-bin php --php-bin /usr/local/sbin/php-fpm ...
+        php get-dd-trace.php --version x.y.z --php-bin php ...
+        php get-dd-trace.php --version x.y.z --php-bin php --php-bin /usr/local/sbin/php-fpm ...
 
 Options:
     -h, --help                  Print this help text and exit
     --php-bin all|<path to php> Install the library to the specified binary or all php binaries in standard search
                                 paths. The option can be provided multiple times.
-    --tracer-version <0.1.2>    Install a specific version. If set --tracer-url and --tracer-file are ignored.
-    --tracer-url <url>          Install the tracing library from a url. If set --tracer-file is ignored.
-    --tracer-file <file>        Install the tracing library from a local .tar.gz file.
+    --version <0.1.2>           Install a specific version. If set --url and --file are ignored.
+    --url <url>                 Install the tracing library from a url. If set --file is ignored.
+    --file <file>               Install the tracing library from a local .tar.gz file.
     --install-dir <path>        Install to a specific directory. Default: '/opt/datadog'
     --uninstall                 Uninstall the library from the specified binaries
+    --enable-profiling          Enable the BETA profiling module.
 
 EOD;
-    exit(0);
 }
 
 function install($options)
 {
+    $platform = is_alpine() ? 'musl' : 'gnu';
+
     // Checking required libraries
     check_library_prerequisite_or_exit('libcurl');
     if (is_alpine()) {
@@ -67,10 +72,12 @@ function install($options)
     $interactive = empty($options[OPT_PHP_BIN]);
 
     // Preparing clean tmp folder to extract files
-    $tmpDir = sys_get_temp_dir() . '/dd-library';
-    $tmpDirTarGz = $tmpDir . '/dd-trace-php.tar.gz';
-    $tmpSourcesDir = $tmpDir . '/opt/datadog-php/dd-trace-sources';
-    $tmpExtensionsDir = $tmpDir . '/opt/datadog-php/extensions';
+    $tmpDir = sys_get_temp_dir() . '/dd-install';
+    $tmpDirTarGz = $tmpDir . "/dd-library-php-x86_64-linux-$platform.tar.gz";
+    $tmpArchiveRoot = $tmpDir . '/dd-library-php';
+    $tmpArchiveTraceRoot = $tmpDir . '/dd-library-php/trace';
+    $tmpArchiveProfilingRoot = $tmpDir . '/dd-library-php/profiling';
+    $tmpBridgeDir = $tmpArchiveTraceRoot . '/bridge';
     execute_or_exit("Cannot create directory '$tmpDir'", "mkdir -p " . escapeshellarg($tmpDir));
     execute_or_exit(
         "Cannot clean '$tmpDir'",
@@ -78,14 +85,13 @@ function install($options)
     );
 
     // Retrieve and extract the archive to a tmp location
-    if (isset($options[OPT_TRACER_FILE])) {
-        $tmpDirTarGz = $options[OPT_TRACER_FILE];
+    if (isset($options[OPT_FILE])) {
+        $tmpDirTarGz = $options[OPT_FILE];
     } else {
-        $url = isset($options[OPT_TRACER_URL])
-            ? $options[OPT_TRACER_URL]
+        $url = isset($options[OPT_URL])
+            ? $options[OPT_URL]
             : "https://github.com/DataDog/dd-trace-php/releases/download/" .
-            $options[OPT_TRACER_VERSION] . "/datadog-php-tracer-" .
-            $options[OPT_TRACER_VERSION] . ".x86_64.tar.gz";
+                $options[OPT_VERSION] . "/dd-library-php-x86_64-linux-$platform.tar.gz";
         download($url, $tmpDirTarGz);
     }
     execute_or_exit(
@@ -93,9 +99,12 @@ function install($options)
         "tar -xf " . escapeshellarg($tmpDirTarGz) . " -C " . escapeshellarg($tmpDir)
     );
 
-    $installDir = $options[OPT_INSTALL_DIR] . '/' . extract_version_subdir_path($options, $tmpDir, $tmpSourcesDir);
+    $releaseVersion = trim(file_get_contents("$tmpArchiveRoot/VERSION"));
+
+    $installDir = $options[OPT_INSTALL_DIR] . '/' . $releaseVersion;
     $installDirSourcesDir = $installDir . '/dd-trace-sources';
-    $installDirWrapperPath = $installDirSourcesDir . '/bridge/dd_wrap_autoloader.php';
+    $installDirBridgeDir = $installDirSourcesDir . '/bridge';
+    $installDirWrapperPath = $installDirBridgeDir . '/dd_wrap_autoloader.php';
 
     // copying sources to the final destination
     execute_or_exit(
@@ -103,8 +112,8 @@ function install($options)
         "mkdir -p " . escapeshellarg($installDirSourcesDir)
     );
     execute_or_exit(
-        "Cannot copy files from '$tmpSourcesDir' to '$installDirSourcesDir'",
-        "cp -r " . escapeshellarg("$tmpSourcesDir") . "/* " . escapeshellarg($installDirSourcesDir)
+        "Cannot copy files from '$tmpBridgeDir' to '$installDirSourcesDir'",
+        "cp -r " . escapeshellarg("$tmpBridgeDir") . ' ' . escapeshellarg($installDirSourcesDir)
     );
     echo "Installed required source files to '$installDir'\n";
 
@@ -112,31 +121,43 @@ function install($options)
     foreach ($selectedBinaries as $command => $fullPath) {
         $binaryForLog = ($command === $fullPath) ? $fullPath : "$command ($fullPath)";
         echo "Installing to binary: $binaryForLog\n";
+
+        $phpMajorMinor = get_php_major_minor($fullPath);
+
+        check_php_ext_prerequisite_or_exit($fullPath, 'json');
+
         $phpProperties = ini_values($fullPath);
+        if (is_truthy($phpProperties[THREAD_SAFETY]) && is_truthy($phpProperties[IS_DEBUG])) {
+            print_error_and_exit('(ZTS DEBUG) builds of PHP are currently not supported');
+        }
 
         // Copying the extension
         $extensionVersion = $phpProperties[PHP_API];
 
         // Suffix (zts/debug/alpine)
         $extensionSuffix = '';
-        if (is_alpine()) {
-            $extensionSuffix = '-alpine';
-        } elseif (is_truthy($phpProperties[IS_DEBUG])) {
+        if (is_truthy($phpProperties[IS_DEBUG])) {
             $extensionSuffix = '-debug';
-        } elseif (is_truthy(THREAD_SAFETY)) {
+        } elseif (is_truthy($phpProperties[THREAD_SAFETY])) {
             $extensionSuffix = '-zts';
         }
-        $extensionRealPath = $tmpExtensionsDir . '/ddtrace-' . $extensionVersion . $extensionSuffix . '.so';
-        $extensionFileName = 'ddtrace.so';
-        $extensionDestination = $phpProperties[EXTENSION_DIR] . '/' . $extensionFileName;
 
-        /* Move - rename() - instead of copy() since copying does a fopen() and copies to the stream itself, causing a
-         * segfault in the PHP process that is running and had loaded the old shared object file.
-         */
-        $tmpExtName = $extensionDestination . '.tmp';
-        copy($extensionRealPath, $tmpExtName);
-        rename($tmpExtName, $extensionDestination);
-        echo "Copied '$extensionRealPath' '$extensionDestination'\n";
+        // Trace
+        $extensionRealPath = "$tmpArchiveTraceRoot/ext/$extensionVersion/ddtrace$extensionSuffix.so" ;
+        $extensionDestination = $phpProperties[EXTENSION_DIR] . '/ddtrace.so';
+        safe_copy_extension($extensionRealPath, $extensionDestination);
+
+        // Profiling
+        $shouldInstallProfiling =
+            in_array($phpMajorMinor, ['7.1', '7.2', '7.3', '7.4', '8.0'])
+            && !is_truthy($phpProperties[THREAD_SAFETY])
+            && !is_truthy($phpProperties[IS_DEBUG]);
+
+        if ($shouldInstallProfiling) {
+            $profilingExtensionRealPath = "$tmpArchiveProfilingRoot/ext/$extensionVersion/datadog-profiling.so";
+            $profilingExtensionDestination = $phpProperties[EXTENSION_DIR] . '/datadog-profiling.so';
+            safe_copy_extension($profilingExtensionRealPath, $profilingExtensionDestination);
+        }
 
         // Writing the ini file
         $iniFileName = '98-ddtrace.ini';
@@ -160,7 +181,7 @@ function install($options)
                     "mkdir -p " . escapeshellarg($iniDir)
                 );
 
-                if (false === file_put_contents($iniFilePath, get_ini_template($installDirWrapperPath))) {
+                if (false === file_put_contents($iniFilePath, '')) {
                     print_error_and_exit("Cannot create INI file $iniFilePath");
                 }
                 echo "Created INI file '$iniFilePath'\n";
@@ -183,9 +204,24 @@ function install($options)
                  */
                 execute_or_exit(
                     'Impossible to update the INI settings file.',
-                    "sed -i 's@extension \?= \?\(.*\)@extension = ddtrace.so@g' " . escapeshellarg($iniFilePath)
+                    "sed -i 's@extension \?= \?.*ddtrace.*\(.*\)@extension = ddtrace.so@g' "
+                        . escapeshellarg($iniFilePath)
                 );
             }
+
+            add_missing_ini_settings($iniFilePath, get_ini_settings($installDirWrapperPath));
+
+            // Enabling profiling
+            if ($shouldInstallProfiling && is_truthy($options[OPT_ENABLE_PROFILING])) {
+                // phpcs:disable Generic.Files.LineLength.TooLong
+                execute_or_exit(
+                    'Impossible to update the INI settings file.',
+                    "sed -i 's@ \?; \?zend_extension \?= \?datadog-profiling.so@zend_extension = datadog-profiling.so@g' "
+                        . escapeshellarg($iniFilePath)
+                );
+                // phpcs:enable Generic.Files.LineLength.TooLong
+            }
+
             echo "Installation to '$binaryForLog' was successful\n";
         }
     }
@@ -193,7 +229,7 @@ function install($options)
     echo "--------------------------------------------------\n";
     echo "SUCCESS\n\n";
     if ($interactive) {
-        echo "Run this script in a non interactive mode adding the following 'php-bin' options:\n";
+        echo "To run this script in a non interactive mode, use the following options:\n";
         $args = array_merge(
             $_SERVER["argv"],
             array_map(
@@ -207,6 +243,24 @@ function install($options)
     }
 }
 
+/**
+ * Copies an extension's file to a destination using copy+rename to avoid segfault if the file is loaded by php.
+ *
+ * @param string $source
+ * @param string $destination
+ * @return void
+ */
+function safe_copy_extension($source, $destination)
+{
+    /* Move - rename() - instead of copy() since copying does a fopen() and copies to the stream itself, causing a
+    * segfault in the PHP process that is running and had loaded the old shared object file.
+    */
+    $tmpName = $destination . '.tmp';
+    copy($source, $tmpName);
+    rename($tmpName, $destination);
+    echo "Copied '$source' to '$destination'\n";
+}
+
 function uninstall($options)
 {
     $selectedBinaries = require_binaries_or_exit($options);
@@ -217,7 +271,10 @@ function uninstall($options)
 
         $phpProperties = ini_values($fullPath);
 
-        $extensionDestination = $phpProperties[EXTENSION_DIR] . '/ddtrace.so';
+        $extensionDestinations = [
+            $phpProperties[EXTENSION_DIR] . '/ddtrace.so',
+            $phpProperties[EXTENSION_DIR] . '/datadog-profiling.so',
+        ];
 
         // Writing the ini file
         $iniFileName = '98-ddtrace.ini';
@@ -241,15 +298,25 @@ function uninstall($options)
         foreach ($iniFilePaths as $iniFilePath) {
             if (file_exists($iniFilePath)) {
                 execute_or_exit(
-                    "Impossible to disable ddtrace from '$iniFilePath'. Disable it manually.",
+                    "Impossible to disable PHP modules from '$iniFilePath'. You can disable them manually.",
                     "sed -i 's@^extension \?=@;extension =@g' " . escapeshellarg($iniFilePath)
                 );
-                echo "Disabled ddtrace in INI file '$iniFilePath'. "
+                execute_or_exit(
+                    "Impossible to disable Zend modules from '$iniFilePath'. You can disable them manually.",
+                    "sed -i 's@^zend_extension \?=@;zend_extension =@g' " . escapeshellarg($iniFilePath)
+                );
+                echo "Disabled all modules in INI file '$iniFilePath'. "
                     . "The file has not been removed to preserve custom settings.\n";
             }
         }
-        if (file_exists($extensionDestination) && false === unlink($extensionDestination)) {
-            print_warning("Error while removing $extensionDestination. It can be manually removed.");
+        $errors = false;
+        foreach ($extensionDestinations as $extensionDestination) {
+            if (file_exists($extensionDestination) && false === unlink($extensionDestination)) {
+                print_warning("Error while removing $extensionDestination. It can be manually removed.");
+                $errors = true;
+            }
+        }
+        if ($errors) {
             echo "Uninstall from '$binaryForLog' was completed with warnings\n";
         } else {
             echo "Uninstall from '$binaryForLog' was successful\n";
@@ -258,7 +325,7 @@ function uninstall($options)
 }
 
 /**
- * Returns a list of php binaries where the tracer will be installed. If not explicitly provided by the CLI options,
+ * Returns a list of php binaries where the library will be installed. If not explicitly provided by the CLI options,
  * then the list is retrieved using an interactive session.
  *
  * @param array $options
@@ -314,6 +381,27 @@ function check_library_prerequisite_or_exit($requiredLibrary)
 }
 
 /**
+ * Checks if an extension is enabled or not.
+ *
+ * @param string $binary
+ * @param string $requiredLibrary E.g. json
+ * @return void
+ */
+function check_php_ext_prerequisite_or_exit($binary, $extName)
+{
+    $lastLine = execute_or_exit(
+        "Cannot retrieve extensions list",
+        // '|| true' is necessary because grep exits with 1 if the pattern was not found.
+        "$binary -m | grep '$extName' || true"
+    );
+
+
+    if (empty($lastLine)) {
+        print_error_and_exit("Required PHP extension '$extName' not found.\n");
+    }
+}
+
+/**
  * @return bool
  */
 function is_alpine()
@@ -337,17 +425,19 @@ function parse_validate_user_options()
     $longOptions = [
         OPT_HELP,
         OPT_PHP_BIN . ':',
-        OPT_TRACER_FILE . ':',
-        OPT_TRACER_URL . ':',
-        OPT_TRACER_VERSION . ':',
+        OPT_FILE . ':',
+        OPT_URL . ':',
+        OPT_VERSION . ':',
         OPT_INSTALL_DIR . ':',
         OPT_UNINSTALL,
+        OPT_ENABLE_PROFILING,
     ];
     $options = getopt($shortOptions, $longOptions);
 
     // Help and exit
     if (key_exists('h', $options) || key_exists(OPT_HELP, $options)) {
-        print_help_and_exit();
+        print_help();
+        exit(0);
     }
 
     $normalizedOptions = [];
@@ -355,28 +445,26 @@ function parse_validate_user_options()
     $normalizedOptions[OPT_UNINSTALL] = isset($options[OPT_UNINSTALL]) ? true : false;
 
     if (!$normalizedOptions[OPT_UNINSTALL]) {
-        // One and only one among --tracer-version, --tracer-url and --tracer-file must be provided
-        $installables = array_intersect([OPT_TRACER_VERSION, OPT_TRACER_URL, OPT_TRACER_FILE], array_keys($options));
+        // One and only one among --version, --url and --file must be provided
+        $installables = array_intersect([OPT_VERSION, OPT_URL, OPT_FILE], array_keys($options));
         if (count($installables) !== 1) {
-            print_error_and_exit(
-                'One and only one among --tracer-version, --tracer-url and --tracer-file must be provided'
-            );
+            print_error_and_exit('One and only one among --version, --url and --file must be provided', true);
         }
-        if (isset($options[OPT_TRACER_VERSION])) {
-            if (is_array($options[OPT_TRACER_VERSION])) {
-                print_error_and_exit('Only one --tracer-version can be provided');
+        if (isset($options[OPT_VERSION])) {
+            if (is_array($options[OPT_VERSION])) {
+                print_error_and_exit('Only one --version can be provided', true);
             }
-            $normalizedOptions[OPT_TRACER_VERSION] = $options[OPT_TRACER_VERSION];
-        } elseif (isset($options[OPT_TRACER_URL])) {
-            if (is_array($options[OPT_TRACER_URL])) {
-                print_error_and_exit('Only one --tracer-url can be provided');
+            $normalizedOptions[OPT_VERSION] = $options[OPT_VERSION];
+        } elseif (isset($options[OPT_URL])) {
+            if (is_array($options[OPT_URL])) {
+                print_error_and_exit('Only one --url can be provided', true);
             }
-            $normalizedOptions[OPT_TRACER_URL] = $options[OPT_TRACER_URL];
-        } elseif (isset($options[OPT_TRACER_FILE])) {
-            if (is_array($options[OPT_TRACER_FILE])) {
-                print_error_and_exit('Only one --tracer-file can be provided');
+            $normalizedOptions[OPT_URL] = $options[OPT_URL];
+        } elseif (isset($options[OPT_FILE])) {
+            if (is_array($options[OPT_FILE])) {
+                print_error_and_exit('Only one --file can be provided', true);
             }
-            $normalizedOptions[OPT_TRACER_FILE] = $options[OPT_TRACER_FILE];
+            $normalizedOptions[OPT_FILE] = $options[OPT_FILE];
         }
     }
 
@@ -393,61 +481,23 @@ function parse_validate_user_options()
         : '/opt/datadog';
     $normalizedOptions[OPT_INSTALL_DIR] =  $normalizedOptions[OPT_INSTALL_DIR] . '/dd-library';
 
+    $normalizedOptions[OPT_ENABLE_PROFILING] = isset($options[OPT_ENABLE_PROFILING]);
+
     return $normalizedOptions;
 }
 
-function print_error_and_exit($message)
+function print_error_and_exit($message, $printHelp = false)
 {
     echo "ERROR: $message\n";
+    if ($printHelp) {
+        print_help();
+    }
     exit(1);
 }
 
 function print_warning($message)
 {
     echo "WARNING: $message\n";
-}
-
-/**
- * Attempts to extract the version number of the installed tracer.
- *
- * @param array $options
- * @param mixed string $extractArchiveRoot
- * @param mixed string $extractedSourcesRoot
- * @return string
- */
-function extract_version_subdir_path($options, $extractArchiveRoot, $extractedSourcesRoot)
-{
-    /* We apply the following decision making algorithm
-     *   1) if --tracer-version is provided, we use it
-     *   2) if a VERSION file exists at the archive root, we use it
-     *   3) if sources are provided, we parse src/DDTrace/Tracer.php
-     *   4) fallback to YYYY.MM.DD-HH.mm
-     */
-
-    // 1)
-    if (isset($options[OPT_TRACER_VERSION])) {
-        return trim($options[OPT_TRACER_VERSION]);
-    }
-
-    // 2)
-    $versionFile = $extractArchiveRoot . '/VERSION';
-    if (is_readable($versionFile)) {
-        return trim(file_get_contents($versionFile));
-    }
-
-    // 3)
-    $ddtracerFile = "$extractedSourcesRoot/src/DDTrace/Tracer.php";
-    if (is_readable($ddtracerFile)) {
-        $content = file_get_contents($ddtracerFile);
-        $matches = array();
-        preg_match("(const VERSION = '([^']+(?<!-nightly))';)", $content, $matches);
-        if (isset($matches[1])) {
-            return trim($matches[1]);
-        }
-    }
-
-    // 4)
-    return date("Y.m.d-H.i");
 }
 
 /**
@@ -500,7 +550,7 @@ function execute_or_exit($exitMessage, $command)
     if (false === $lastLine || $returnCode > 0) {
         print_error_and_exit(
             $exitMessage .
-                "\nFailed command: $command\n---- Output ----\n" .
+                "\nFailed command (return code $returnCode): $command\n---- Output ----\n" .
                 implode("\n", $output) .
                 "\n---- End of output ----\n"
         );
@@ -751,136 +801,325 @@ function build_known_command_names_matrix()
     return array_unique($results);
 }
 
-function get_ini_template($requestInitHookPath)
+/**
+ * Adds ini entries that are not present in the provided ini file.
+ *
+ * @param string $iniFilePath
+ */
+function add_missing_ini_settings($iniFilePath, $settings)
+{
+    $iniFileContent = file_get_contents($iniFilePath);
+    $formattedMissingProperties = '';
+
+    foreach ($settings as $setting) {
+        $settingMightExist = 1 === preg_match(
+            '/' . str_replace('.', '\.', $setting['name']) . '\s?=\s?/',
+            $iniFileContent
+        );
+        if ($settingMightExist) {
+            continue;
+        }
+
+        // Formatting the setting to be added.
+        $description =
+            is_string($setting['description'])
+                ? '; ' . $setting['description']
+                : implode(
+                    "\n",
+                    array_map(
+                        function ($line) {
+                            return '; ' . $line;
+                        },
+                        $setting['description']
+                    )
+                );
+        $setting = ($setting['commented'] ? ';' : '') . $setting['name'] . ' = ' . $setting['default'];
+        $formattedMissingProperties .= "\n$description\n$setting\n";
+    }
+
+    if ($formattedMissingProperties !== '') {
+        if (false === file_put_contents($iniFilePath, $iniFileContent . $formattedMissingProperties)) {
+            print_error_and_exit("Cannot add additional settings to the INI file $iniFilePath");
+        }
+    }
+}
+
+function get_php_major_minor($binary)
+{
+    return execute_or_exit(
+        "Cannot read PHP version",
+        "$binary -v | grep -oE 'PHP [[:digit:]]+.[[:digit:]]+' | awk '{print \$NF}'"
+    );
+}
+
+/**
+ * Returns array of associative arrays with the following keys:
+ *   - name (string): the setting name;
+ *   - default (string): the default value;
+ *   - commented (bool): whether this setting should be commented or not when added;
+ *   - description (string|string[]): A string (or an array of strings, each representing a line) that describes
+ *                                    the setting.
+ *
+ * @param string $requestInitHookPath
+ * @return array
+ */
+function get_ini_settings($requestInitHookPath)
 {
     // phpcs:disable Generic.Files.LineLength.TooLong
-    return <<<EOD
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-; Required settings
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-; Enables or disables tracing (set by the installer, do not change it)
-extension = ddtrace.so
-
-; Path to the request init hook (set by the installer, do not change it)
-datadog.trace.request_init_hook = $requestInitHookPath
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-; Common settings
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-; Enables or disables tracing. On by default.
-;datadog.trace.enabled = On
-
-; Enables or disables debug mode.  When On logs are printed to the error_log.
-;datadog.trace.debug = Off
-
-; Enables startup logs, including diagnostic checks.
-;datadog.trace.startup_logs = On
-
-; Sets a custom service name for the application.
-;datadog.service = my_service
-
-; Sets a custom environment name for the application.
-;datadog.env = my_env
-
-; Sets a version for the user application, not the datadog php library.
-;datadog.version = 1.0.0
-
-; Configures the agent host and ports. If you need more flexibility use `datadog.trace.agent_url` instead.
-;datadog.agent_host = localhost
-;datadog.trace.agent_port = 8126
-;datadog.dogstatsd_port = 8125
-
-; When set, 'datadog.trace.agent_url' has priority over 'datadog.agent_host' and 'datadog.trace.agent_port'.
-;datadog.trace.agent_url = http://some.internal.host:6789
-
-; Sets the service name of spans generated for HTTP clients' requests to host-<hostname>.
-;datadog.trace.http_client_split_by_domain = Off
-
-; Configures URL to resource name normalization. For more details see:
-; https://docs.datadoghq.com/tracing/setup_overview/setup/php/?tab=containers#map-resource-names-to-normalized-uri
-; NOTE: Colons ',' in `datadog.trace.resource_uri_fragment_regex` are not supported.
-;datadog.trace.url_as_resource_names_enabled = On
-;datadog.trace.resource_uri_fragment_regex =
-;datadog.trace.resource_uri_mapping_incoming =
-;datadog.trace.resource_uri_mapping_outgoing =
-
-; Changes the default name of an APM integration. Rename one or more integrations at a time, for example:
-; "pdo:payments-db,mysqli:orders-db"
-;datadog.service_mapping =
-
-; Tags to be set on all spans, for example: "key1:value1,key2:value2".
-;datadog.tags =
-
-; The sampling rate for the trace. Valid values are between 0.0 and 1.0.
-;datadog.trace.sample_rate = 1.0
-
-; A JSON encoded string to configure the sampling rate.
-; Examples:
-;   - Set the sample rate to 20%: '[{"sample_rate": 0.2}]'.
-;   - Set the sample rate to 10% for services starting with ‘a’ and span name ‘b’ and set the sample rate to 20%
-;     for all other services: '[{"service": "a.*", "name": "b", "sample_rate": 0.1}, {"sample_rate": 0.2}]'
-; **Note** that the JSON object must be included in single quotes (') to avoid problems with escaping of the
-; double quote (") character.
-;datadog.trace.sampling_rules =
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-; CLI settings
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-; Enable or disable tracing of CLI scripts. Off by default.
-;datadog.trace.cli_enabled = Off
-
-; For long running processes, this setting has to be set to On
-;datadog.trace.auto_flush_enabled = Off
-
-; For long running processes, this setting has to be set to Off
-;datadog.trace.generate_root_span = On
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-; Integrations settings
-; For each integration (see https://docs.datadoghq.com/tracing/setup_overview/setup/php/?tab=containers#integration-names):
-;   - *_enabled: whether the integration is enabled.
-;   - *_analytics_enabled: whether analytics for the integration is enabled.
-;   - *_analytics_sample_rate: sampling rate for analyzed spans. Valid values are between 0.0 and 1.0.
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-;datadog.trace.<integration_name>_enabled = On
-;datadog.trace.<integration_name>_analytics_enabled = Off
-;datadog.trace.<integration_name>_analytics_sample_rate = 1.0
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-; Other settings
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-; Enables distributed tracing.
-;datadog.distributed_tracing = On
-
-; Global switch for trace analytics.
-;datadog.trace.analytics_enabled = Off
-
-; Set connection timeout in millisecodns while connecting to the agent.
-;datadog.trace.bgs_connect_timeout = 2000
-
-; Set request timeout in millisecodns while while sending payloads to the agent.
-;datadog.trace.bgs_timeout = 5000
-
-; Set the maximum number of spans generated per trace during a single request.
-;datadog.trace.spans_limit = 1000
-
-; Only for Linux. Set to `true` to retain capabilities on Datadog background threads when you change the effective
-; user ID. This option does not affect most setups, but some modules - to date Datadog is only aware of Apache’s
-; mod-ruid2 - may invoke `setuid()` or similar syscalls, leading to crashes or loss of functionality as it loses
-; capabilities.
-; **Note** Enabling this option may compromise security. This option, standalone, does not pose a security risk.
-; However, an attacker being able to exploit a vulnerability in PHP or web server may be able to escalate privileges
-; with relative ease, if the web server or PHP were started with full capabilities, as the background threads will
-; retain their original capabilities. Datadog recommends restricting the capabilities of the web server with the
-; setcap utility.
-;datadog.trace.retain_thread_capabilities = Off
-
-EOD;
+    return [
+        [
+            'name' => 'extension',
+            'default' => 'ddtrace.so',
+            'commented' => false,
+            'description' => 'Enables or disables tracing (set by the installer, do not change it)',
+        ],
+        [
+            'name' => 'zend_extension',
+            'default' => 'datadog-profiling.so',
+            'commented' => true,
+            'description' => 'Enables the profiling module',
+        ],
+        [
+            'name' => 'datadog.trace.request_init_hook',
+            'default' => $requestInitHookPath,
+            'commented' => false,
+            'description' => 'Path to the request init hook (set by the installer, do not change it)',
+        ],
+        [
+            'name' => 'datadog.trace.enabled',
+            'default' => 'On',
+            'commented' => true,
+            'description' => 'Enables or disables tracing. On by default',
+        ],
+        [
+            'name' => 'datadog.trace.cli_enabled',
+            'default' => 'Off',
+            'commented' => true,
+            'description' => 'Enable or disable tracing of CLI scripts. Off by default',
+        ],
+        [
+            'name' => 'datadog.trace.auto_flush_enabled',
+            'default' => 'Off',
+            'commented' => true,
+            'description' => 'For long running processes, this setting has to be set to On',
+        ],
+        [
+            'name' => 'datadog.trace.generate_root_span',
+            'default' => 'On',
+            'commented' => true,
+            'description' => 'For long running processes, this setting has to be set to Off',
+        ],
+        [
+            'name' => 'datadog.trace.debug',
+            'default' => 'Off',
+            'commented' => true,
+            'description' => 'Enables or disables debug mode.  When On logs are printed to the error_log',
+        ],
+        [
+            'name' => 'datadog.trace.startup_logs',
+            'default' => 'On',
+            'commented' => true,
+            'description' => 'Enables startup logs, including diagnostic checks',
+        ],
+        [
+            'name' => 'datadog.service',
+            'default' => 'unnamed-php-service',
+            'commented' => true,
+            'description' => 'Sets a custom service name for the application',
+        ],
+        [
+            'name' => 'datadog.env',
+            'default' => 'my_env',
+            'commented' => true,
+            'description' => 'Sets a custom environment name for the application',
+        ],
+        [
+            'name' => 'datadog.version',
+            'default' => '1.0.0',
+            'commented' => true,
+            'description' => 'Sets a version for the user application, not the datadog php library',
+        ],
+        [
+            'name' => 'datadog.agent_host',
+            'default' => '127.0.0.1',
+            'commented' => true,
+            'description' => 'Configures the agent host. If you need more flexibility use `datadog.trace.agent_url` instead',
+        ],
+        [
+            'name' => 'datadog.trace.agent_port',
+            'default' => '8126',
+            'commented' => true,
+            'description' => 'Configures the agent port. If you need more flexibility use `datadog.trace.agent_url` instead',
+        ],
+        [
+            'name' => 'datadog.dogstatsd_port',
+            'default' => '8125',
+            'commented' => true,
+            'description' => 'Configures the dogstatsd agent port',
+        ],
+        [
+            'name' => 'datadog.trace.agent_url',
+            'default' => 'http://127.0.0.1:8126',
+            'commented' => true,
+            'description' => 'When set, `datadog.trace.agent_url` has priority over `datadog.agent_host` and `datadog.trace.agent_port`',
+        ],
+        [
+            'name' => 'datadog.trace.http_client_split_by_domain',
+            'default' => 'Off',
+            'commented' => true,
+            'description' => 'Sets the service name of spans generated for HTTP clients\' requests to host-<hostname>',
+        ],
+        [
+            'name' => 'datadog.trace.url_as_resource_names_enabled',
+            'default' => 'On',
+            'commented' => true,
+            'description' => [
+                'Enables URL to resource name normalization. For more details see:',
+                'https://docs.datadoghq.com/tracing/setup_overview/setup/php/?tab=containers#map-resource-names-to-normalized-uri',
+            ],
+        ],
+        [
+            'name' => 'datadog.trace.resource_uri_fragment_regex',
+            'default' => '',
+            'commented' => true,
+            'description' => [
+                'Configures obfuscation patterns based on regex. For more details see:',
+                'https://docs.datadoghq.com/tracing/setup_overview/setup/php/?tab=containers#map-resource-names-to-normalized-uri',
+            ],
+        ],
+        [
+            'name' => 'datadog.trace.resource_uri_mapping_incoming',
+            'default' => '',
+            'commented' => true,
+            'description' => [
+                'Configures obfuscation path fragments for incoming requests. For more details see:',
+                'https://docs.datadoghq.com/tracing/setup_overview/setup/php/?tab=containers#map-resource-names-to-normalized-uri',
+            ],
+        ],
+        [
+            'name' => 'datadog.trace.resource_uri_mapping_outgoing',
+            'default' => '',
+            'commented' => true,
+            'description' => [
+                'Configures obfuscation path fragments for outgoing requests. For more details see:',
+                'https://docs.datadoghq.com/tracing/setup_overview/setup/php/?tab=containers#map-resource-names-to-normalized-uri',
+            ],
+        ],
+        [
+            'name' => 'datadog.service_mapping',
+            'default' => '',
+            'commented' => true,
+            'description' => [
+                'Changes the default name of an APM integration. Rename one or more integrations at a time, for example:',
+                '"pdo:payments-db,mysqli:orders-db"',
+            ],
+        ],
+        [
+            'name' => 'datadog.tags',
+            'default' => '',
+            'commented' => true,
+            'description' => 'Tags to be set on all spans, for example: "key1:value1,key2:value2"',
+        ],
+        [
+            'name' => 'datadog.trace.sample_rate',
+            'default' => '1.0',
+            'commented' => true,
+            'description' => 'The sampling rate for the trace. Valid values are between 0.0 and 1.0',
+        ],
+        [
+            'name' => 'datadog.trace.sample_rate',
+            'default' => '1.0',
+            'commented' => true,
+            'description' => 'The sampling rate for the trace. Valid values are between 0.0 and 1.0',
+        ],
+        [
+            'name' => 'datadog.trace.sampling_rules',
+            'default' => '',
+            'commented' => true,
+            'description' => [
+                'A JSON encoded string to configure the sampling rate.',
+                'Examples:',
+                '  - Set the sample rate to 20%: \'[{"sample_rate": 0.2}]\'.',
+                '  - Set the sample rate to 10% for services starting with `a` and span name `b` and set the sample rate to 20%',
+                '    for all other services: \'[{"service": "a.*", "name": "b", "sample_rate": 0.1}, {"sample_rate": 0.2}]\'',
+                '**Note** that the JSON object must be included in single quotes (\') to avoid problems with escaping of the',
+                'double quote (") character.',
+            ],
+        ],
+        [
+            'name' => 'datadog.trace.<integration_name>_enabled',
+            'default' => 'On',
+            'commented' => true,
+            'description' => [
+                'Whether a specific integration is enabled.',
+                'Integrations names available at: see https://docs.datadoghq.com/tracing/setup_overview/setup/php/?tab=containers#integration-names',
+            ],
+        ],
+        [
+            'name' => 'datadog.trace.<integration_name>_analytics_enabled',
+            'default' => 'Off',
+            'commented' => true,
+            'description' => [
+                'Whether analytics for the integration is enabled.',
+                'Integrations names available at: see https://docs.datadoghq.com/tracing/setup_overview/setup/php/?tab=containers#integration-names',
+            ],
+        ],
+        [
+            'name' => 'datadog.trace.<integration_name>_analytics_sample_rate',
+            'default' => '1.0',
+            'commented' => true,
+            'description' => [
+                'Sampling rate for analyzed spans. Valid values are between 0.0 and 1.0.',
+                'Integrations names available at: see https://docs.datadoghq.com/tracing/setup_overview/setup/php/?tab=containers#integration-names',
+            ],
+        ],
+        [
+            'name' => 'datadog.distributed_tracing',
+            'default' => 'On',
+            'commented' => true,
+            'description' => 'Enables distributed tracing',
+        ],
+        [
+            'name' => 'datadog.trace.analytics_enabled',
+            'default' => 'Off',
+            'commented' => true,
+            'description' => 'Global switch for trace analytics',
+        ],
+        [
+            'name' => 'datadog.trace.bgs_connect_timeout',
+            'default' => '2000',
+            'commented' => true,
+            'description' => 'Set connection timeout in milliseconds while connecting to the agent',
+        ],
+        [
+            'name' => 'datadog.trace.bgs_timeout',
+            'default' => '5000',
+            'commented' => true,
+            'description' => 'Set request timeout in milliseconds while sending payloads to the agent',
+        ],
+        [
+            'name' => 'datadog.trace.spans_limit',
+            'default' => '1000',
+            'commented' => true,
+            'description' => 'datadog.trace.spans_limit = 1000',
+        ],
+        [
+            'name' => 'datadog.trace.retain_thread_capabilities',
+            'default' => 'Off',
+            'commented' => true,
+            'description' => [
+                'Only for Linux. Set to `true` to retain capabilities on Datadog background threads when you change the effective',
+                'user ID. This option does not affect most setups, but some modules - to date Datadog is only aware of Apache`s',
+                'mod-ruid2 - may invoke `setuid()` or similar syscalls, leading to crashes or loss of functionality as it loses',
+                'capabilities.',
+                '**Note** Enabling this option may compromise security. This option, standalone, does not pose a security risk.',
+                'However, an attacker being able to exploit a vulnerability in PHP or web server may be able to escalate privileges',
+                'with relative ease, if the web server or PHP were started with full capabilities, as the background threads will',
+                'retain their original capabilities. Datadog recommends restricting the capabilities of the web server with the',
+                'setcap utility.',
+            ],
+        ],
+    ];
     // phpcs:enable Generic.Files.LineLength.TooLong
 }
 

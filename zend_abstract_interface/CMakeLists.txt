@@ -29,6 +29,11 @@ if (${BUILD_ZAI_ASAN})
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -fno-omit-frame-pointer")
 endif()
 
+option(RUN_SHARED_EXTS_TESTS "Enable shared extension tests" OFF)
+if (${RUN_SHARED_EXTS_TESTS})
+  add_definitions(-DRUN_SHARED_EXTS_TESTS)
+endif()
+
 include(GNUInstallDirs)
 
 add_library(zai_zend_abstract_interface INTERFACE)
@@ -88,6 +93,7 @@ add_subdirectory(functions)
 add_subdirectory(env)
 add_subdirectory(exceptions)
 add_subdirectory(config)
+add_subdirectory(json)
 if(PHP_VERSION_DIRECTORY STREQUAL "php5")
   # TODO Support PHP 7 & PHP 8
   add_subdirectory(methods)

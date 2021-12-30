@@ -2,7 +2,6 @@
 
 namespace DDTrace\Integrations\Guzzle;
 
-use DDTrace\Format;
 use DDTrace\GlobalTracer;
 use DDTrace\Http\Urls;
 use DDTrace\Integrations\Integration;
@@ -13,7 +12,6 @@ use GuzzleHttp;
 
 class GuzzleIntegration extends Integration
 {
-
     const NAME = 'guzzle';
 
     public function getName()
@@ -106,7 +104,7 @@ class GuzzleIntegration extends Integration
                 $span->service = Urls::hostnameForTag($url);
             }
             $span->meta[Tag::HTTP_METHOD] = $request->getMethod();
-            $span->meta[Tag::HTTP_URL] = Urls::sanitize($url);
+            $span->meta[Tag::HTTP_URL] = \DDTrace\Private_\util_url_sanitize($url);
         } elseif (\is_a($request, 'GuzzleHttp\Message\RequestInterface')) {
             /** @var \GuzzleHttp\Message\RequestInterface $request */
             $url = $request->getUrl();
@@ -114,7 +112,7 @@ class GuzzleIntegration extends Integration
                 $span->service = Urls::hostnameForTag($url);
             }
             $span->meta[Tag::HTTP_METHOD] = $request->getMethod();
-            $span->meta[Tag::HTTP_URL] = Urls::sanitize($url);
+            $span->meta[Tag::HTTP_URL] = \DDTrace\Private_\util_url_sanitize($url);
         }
     }
 }
