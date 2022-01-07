@@ -9,7 +9,15 @@ class LoggerTest extends BaseTestCase
 {
     public function testDefaultsToNullLogger()
     {
-        $this->assertInstanceOf('DDTrace\Log\NullLogger', Logger::get());
+        Logger::reset();
+
+        $original_debug = ini_get("datadog.trace.debug");
+        ini_set("datadog.trace.debug", false);
+        try {
+            $this->assertInstanceOf('DDTrace\Log\NullLogger', Logger::get());
+        } finally {
+            ini_set("datadog.trace.debug", $original_debug);
+        }
     }
 
     public function testProvidedLoggerIsHonored()

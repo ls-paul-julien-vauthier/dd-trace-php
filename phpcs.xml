@@ -25,7 +25,7 @@
     </rule>
     <rule ref="PSR1.Classes.ClassDeclaration.MultipleClasses">
         <exclude-pattern>*/Span.php</exclude-pattern>
-        <exclude-pattern>src/DDTrace/Integrations/MongoDB/MongoDBIntegration.php</exclude-pattern>
+        <exclude-pattern>src/Integrations/Integrations/MongoDB/MongoDBIntegration.php</exclude-pattern>
         <exclude-pattern>tests/*</exclude-pattern>
     </rule>
     <rule ref="PSR1.Files.SideEffects.FoundWithSymbols">
@@ -55,7 +55,9 @@
     <exclude-pattern>*/tests/stubs/*</exclude-pattern>
     <exclude-pattern>*/vendor/*</exclude-pattern>
     <exclude-pattern>bridge/_generated_api.php</exclude-pattern>
-    <exclude-pattern>bridge/_generated_internal.php</exclude-pattern>
+    <exclude-pattern>bridge/_generated_integrations.php</exclude-pattern>
+    <exclude-pattern>bridge/_generated_tracer.php</exclude-pattern>
+    <exclude-pattern>bridge/_generated_tracer_api.php</exclude-pattern>
     <exclude-pattern>bridge/dd_register_optional_deps_autoloader.php</exclude-pattern>
     <exclude-pattern>dockerfiles/*</exclude-pattern>
     <exclude-pattern>playground*.php</exclude-pattern>

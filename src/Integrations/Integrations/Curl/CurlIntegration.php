@@ -63,11 +63,11 @@ final class CurlIntegration extends Integration
                 }
 
                 $info = \curl_getinfo($ch);
-                $sanitizedUrl = \DDtrace\Private_\util_url_sanitize($info['url']);
-                $normalizedPath = \DDtrace\Private_\util_uri_normalize_outgoing_path($info['url']);
+                $sanitizedUrl = \DDtrace\Util\Normalizer::urlSanitize($info['url']);
+                $normalizedPath = \DDtrace\Util\Normalizer::uriNormalizeOutgoingPath($info['url']);
                 unset($info['url']);
 
-                if (\ddtrace_config_http_client_split_by_domain_enabled()) {
+                if (\DDTrace\Util\Runtime::getBoolIni("datadog.trace.http_client_split_by_domain")) {
                     $span->service = Urls::hostnameForTag($sanitizedUrl);
                 }
 

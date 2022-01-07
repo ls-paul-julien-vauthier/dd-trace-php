@@ -45,3 +45,6 @@ final class GlobalTracer
         return self::$instance = NoopTracer::create();
     }
 }
+
+// Ensure that, when trying to use the legacy API, our Tracer is also loaded
+class_exists('DDTrace\\Tracer');

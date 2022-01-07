@@ -5,9 +5,13 @@
     "scripts": {
         "generate": [
             "classpreloader.php compile --config=../../bridge/_files_api.php --output=../../bridge/_generated_api.php --strip_comments=1",
-            "classpreloader.php compile --config=../../bridge/_files_internal.php --output=../../bridge/_generated_internal.php --strip_comments=1",
+            "classpreloader.php compile --config=../../bridge/_files_integrations.php --output=../../bridge/_generated_integrations.php --strip_comments=1",
+            "classpreloader.php compile --config=../../bridge/_files_tracer.php --output=../../bridge/_generated_tracer.php --strip_comments=1",
+            "classpreloader.php compile --config=../../bridge/_files_tracer_api.php --output=../../bridge/_generated_tracer_api.php --strip_comments=1",
             "sed -i \"s/'[^']\\+bridge\\/\\.\\./__DIR__ . '\\/../g\" ../../bridge/_generated_api.php",
-            "sed -i \"s/'[^']\\+bridge\\/\\.\\./__DIR__ . '\\/../g\" ../../bridge/_generated_internal.php"
+            "sed -i \"s/'[^']\\+bridge\\/\\.\\./__DIR__ . '\\/../g\" ../../bridge/_generated_integrations.php",
+            "sed -i \"s/'[^']\\+bridge\\/\\.\\./__DIR__ . '\\/../g\" ../../bridge/_generated_tracer.php",
+            "sed -i \"s/'[^']\\+bridge\\/\\.\\./__DIR__ . '\\/../g\" ../../bridge/_generated_tracer_api.php"
         ],
         "verify": "php ../../bridge/autoload.php"
     }

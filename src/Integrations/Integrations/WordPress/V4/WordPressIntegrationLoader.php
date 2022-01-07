@@ -27,7 +27,7 @@ class WordPressIntegrationLoader
         $service = \ddtrace_config_app_name(WordPressIntegration::NAME);
         $this->rootSpan->service = $service;
         if ('cli' !== PHP_SAPI) {
-            $normalizedPath = \DDtrace\Private_\util_uri_normalize_incoming_path($_SERVER['REQUEST_URI']);
+            $normalizedPath = \DDtrace\Util\Normalizer::uriNormalizeincomingPath($_SERVER['REQUEST_URI']);
             $this->rootSpan->resource = $_SERVER['REQUEST_METHOD'] . ' ' . $normalizedPath;
             $this->rootSpan->meta[Tag::HTTP_URL] = home_url(add_query_arg($_GET));
         }

@@ -98,19 +98,19 @@ class GuzzleIntegration extends Integration
         if (\is_a($request, 'Psr\Http\Message\RequestInterface')) {
             /** @var \Psr\Http\Message\RequestInterface $request */
             $url = $request->getUri();
-            if (\ddtrace_config_http_client_split_by_domain_enabled()) {
+            if (\DDTrace\Util\Runtime::getBoolIni("datadog.trace.http_client_split_by_domain")) {
                 $span->service = Urls::hostnameForTag($url);
             }
             $span->meta[Tag::HTTP_METHOD] = $request->getMethod();
-            $span->meta[Tag::HTTP_URL] = \DDTrace\Private_\util_url_sanitize($url);
+            $span->meta[Tag::HTTP_URL] = \DDTrace\Util\Normalizer::urlSanitize($url);
         } elseif (\is_a($request, 'GuzzleHttp\Message\RequestInterface')) {
             /** @var \GuzzleHttp\Message\RequestInterface $request */
             $url = $request->getUrl();
-            if (\ddtrace_config_http_client_split_by_domain_enabled()) {
+            if (\DDTrace\Util\Runtime::getBoolIni("datadog.trace.http_client_split_by_domain")) {
                 $span->service = Urls::hostnameForTag($url);
             }
             $span->meta[Tag::HTTP_METHOD] = $request->getMethod();
-            $span->meta[Tag::HTTP_URL] = \DDTrace\Private_\util_url_sanitize($url);
+            $span->meta[Tag::HTTP_URL] = \DDTrace\Util\Normalizer::urlSanitize($url);
         }
     }
 }

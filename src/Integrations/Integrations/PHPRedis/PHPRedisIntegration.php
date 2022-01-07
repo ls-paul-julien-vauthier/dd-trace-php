@@ -6,7 +6,6 @@ use DDTrace\Integrations\Integration;
 use DDTrace\SpanData;
 use DDTrace\Tag;
 use DDTrace\Type;
-use DDTrace\Private_;
 use DDTrace\Util\ObjectKVStore;
 
 class PHPRedisIntegration extends Integration
@@ -35,10 +34,10 @@ class PHPRedisIntegration extends Integration
             $span->meta[Tag::TARGET_PORT] = (isset($args[1]) && \is_numeric($args[1])) ? $args[1] : 6379;
 
             // Service name
-            if (empty($hostOrUDS) || !\ddtrace_config_redis_client_split_by_host_enabled()) {
+            if (empty($hostOrUDS) || !\DDTrace\Util\Runtime::getBoolIni("datadog.trace.redis_client_split_by_host")) {
                 $serviceName = 'phpredis';
             } else {
-                $serviceName = 'redis-' . Private_\util_normalize_host_uds_as_service($hostOrUDS);
+                $serviceName = 'redis-' . \DDTrace\Util\Normalizer::normalizeHostUdsAsService($hostOrUDS);
             }
 
             // While we would have access to Redis::getHost() from the instance to retrieve it later, we compute the

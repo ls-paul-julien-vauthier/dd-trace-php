@@ -62,7 +62,7 @@ class CodeIgniterIntegration extends Integration
         $rootSpan->type = Type::WEB_SERVLET;
 
         if ('cli' !== PHP_SAPI) {
-            $normalizedPath = \DDtrace\Private_\util_uri_normalize_incoming_path($_SERVER['REQUEST_URI']);
+            $normalizedPath = \DDtrace\Util\Normalizer::uriNormalizeincomingPath($_SERVER['REQUEST_URI']);
             $rootSpan->resource = "{$_SERVER['REQUEST_METHOD']} $normalizedPath";
         }
 

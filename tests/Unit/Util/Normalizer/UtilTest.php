@@ -1,8 +1,7 @@
 <?php
 
-namespace DDTrace\Tests\Unit\Private_;
+namespace DDTrace\Tests\Unit\Util\Normalizer;
 
-use DDTrace\Private_;
 use DDTrace\Tests\Common\BaseTestCase;
 
 class UtilTest extends BaseTestCase
@@ -12,7 +11,7 @@ class UtilTest extends BaseTestCase
      */
     public function testDataProviderHostUDSAsServiceNormalization($hostOrUDS, $expected)
     {
-        $this->assertSame(Private_\util_normalize_host_uds_as_service($hostOrUDS), $expected);
+        $this->assertSame(\DDTrace\Util\Normalizer::normalizeHostUdsAsService($hostOrUDS), $expected);
     }
 
     public function dataProviderHostUDSAsServiceNormalization()

@@ -3,7 +3,6 @@
 namespace DDTrace\Integrations\Predis;
 
 use DDTrace\Integrations\Integration;
-use DDTrace\Private_;
 use DDTrace\SpanData;
 use DDTrace\Tag;
 use DDTrace\Type;
@@ -148,10 +147,12 @@ class PredisIntegration extends Integration
             $tags[Tag::TARGET_HOST] = $connectionParameters->host;
             $tags[Tag::TARGET_PORT] = $connectionParameters->port;
 
-            if (\ddtrace_config_redis_client_split_by_host_enabled()) {
-                $service = 'redis-' . (isset($connectionParameters->path)
-                    ? Private_\util_normalize_host_uds_as_service($connectionParameters->path)
-                    : Private_\util_normalize_host_uds_as_service($connectionParameters->host));
+            if (\DDTrace\Util\Runtime::getBoolIni("datadog.trace.redis_client_split_by_host")) {
+                $service = \DDTrace\Util\Normalizer::normalizeHostUdsAsService(
+                    'redis-' . (isset($connectionParameters->path)
+                        ? $connectionParameters->path
+                    : $connectionParameters->host)
+                );
             }
         }
 

@@ -87,7 +87,10 @@ class LumenIntegration extends Integration
                         $span->resource = $routeAlias;
                         $resourceName = $routeAlias;
                     }
-                    if (null !== $resourceName && !\ddtrace_config_url_resource_name_enabled()) {
+                    if (
+                        null !== $resourceName
+                        && !\DDTrace\Util\Runtime::getBoolIni("datadog.trace.url_as_resource_names_enabled")
+                    ) {
                         $rootSpan->resource = $rootSpan->meta[Tag::HTTP_METHOD] . ' ' . $resourceName;
                     }
                 },

@@ -40,4 +40,10 @@ final class Runtime
 
         return false;
     }
+
+    public static function getBoolIni($iniName)
+    {
+        $ini = ini_get($iniName);
+        return $ini === "on" || $ini === "yes" || $ini === "true" || (int) $ini;
+    }
 }
